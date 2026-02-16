@@ -141,6 +141,8 @@ void MessengerServer::handleClient(int clientSocket) {
                 response = handleSetAvatar(params["sessionId"], params["data"], params["mime"]);
             } else if (cmd == "GET_INBOX") {
                 response = handleGetInbox(params["sessionId"]);
+            } else if (cmd == "DELETE_CHAT") {
+                response = handleDeleteChat(params["sessionId"], params["contact"]);
             }
 
             sendMessage(clientSocket, response);
@@ -357,6 +359,30 @@ std::string MessengerServer::handleGetInbox(const std::string& sessionId, int li
                        row["body"].as<std::string>();
         }
         return response;
+    } catch (const std::exception& e) {
+        return "[ERROR] " + std::string(e.what());
+    }
+}
+
+std::string MessengerServer::handleDeleteChat(const std::string& sessionId, const std::string& contactUsername) {
+    Session* session = sessionMgr_.getSession(sessionId);
+    if (!session) {
+        return "[ERROR] Invalid session";
+    }
+
+    if (contactUsername.empty()) {
+        return "[ERROR] Contact username required";
+    }
+
+    int userId = session->getUserId();
+    try {
+        pqxx::result contactRes = db_.getUserByUsername(contactUsername);
+        if (contactRes.empty()) {
+            return "[ERROR] User not found";
+        }
+        int contactId = contactRes[0]["id"].as<int>();
+        int removed = db_.deleteChatMessages(userId, contactId);
+        return "[OK] ChatDeleted:count=" + std::to_string(removed);
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
     }

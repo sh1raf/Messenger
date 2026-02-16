@@ -49,6 +49,7 @@ private:
     std::string handleGetProfile(const std::string& username);
     std::string handleSetAvatar(const std::string& sessionId, const std::string& avatarB64, const std::string& avatarMime);
     std::string handleGetInbox(const std::string& sessionId, int limit = 20, int offset = 0);
+    std::string handleDeleteChat(const std::string& sessionId, const std::string& contactUsername);
 
     // Helper
     bool parseCommand(const std::string& data, std::string& cmd, std::unordered_map<std::string, std::string>& params);
