@@ -1,6 +1,7 @@
 #include <pqxx/pqxx>
 #include <iostream>
 #include <string>
+#include <vector>
 
 class PostgresConnection {
 public:
@@ -340,6 +341,35 @@ public:
             return res;
         } catch (const std::exception& e) {
             std::cerr << "[PSQL.Database] getChatsWithUnreadCounts error: " << e.what() << std::endl;
+            throw;
+        }
+    }
+
+    std::vector<int> getChatPartnerIds(int userId) {
+        if (!pgConn.isConnected()) {
+            throw std::runtime_error("[PSQL.Database] Database not connected");
+        }
+
+        try {
+            pqxx::work txn(*pgConn.getConnection());
+            pqxx::result res = txn.exec(
+                "SELECT DISTINCT CASE "
+                "  WHEN sender_id = " + txn.quote(userId) + " THEN receiver_id "
+                "  ELSE sender_id "
+                "END AS partner_id "
+                "FROM messages "
+                "WHERE sender_id = " + txn.quote(userId) + " OR receiver_id = " + txn.quote(userId)
+            );
+            txn.commit();
+
+            std::vector<int> partners;
+            partners.reserve(res.size());
+            for (auto row : res) {
+                partners.push_back(row["partner_id"].as<int>());
+            }
+            return partners;
+        } catch (const std::exception& e) {
+            std::cerr << "[PSQL.Database] getChatPartnerIds error: " << e.what() << std::endl;
             throw;
         }
     }

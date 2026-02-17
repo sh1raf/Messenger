@@ -108,6 +108,7 @@ void MessengerServer::acceptConnections() {
 }
 
 void MessengerServer::handleClient(int clientSocket) {
+    bool subscribed = false;
     try {
         while (running_) {
             std::string request = receiveMessage(clientSocket);
@@ -143,12 +144,21 @@ void MessengerServer::handleClient(int clientSocket) {
                 response = handleGetInbox(params["sessionId"]);
             } else if (cmd == "DELETE_CHAT") {
                 response = handleDeleteChat(params["sessionId"], params["contact"]);
+            } else if (cmd == "SUBSCRIBE") {
+                response = handleSubscribe(params["sessionId"], clientSocket);
+                if (response.rfind("[OK]", 0) == 0) {
+                    subscribed = true;
+                }
             }
 
             sendMessage(clientSocket, response);
         }
     } catch (const std::exception& e) {
         std::cerr << "[Server] Client error: " << e.what() << std::endl;
+    }
+
+    if (subscribed) {
+        unregisterSubscriber(clientSocket);
     }
 
     close(clientSocket);
@@ -238,6 +248,7 @@ std::string MessengerServer::handleSendMessage(const std::string& sessionId, con
     }
 
     int senderId = session->getUserId();
+    std::string senderUsername = session->getUsername();
     try {
         pqxx::result receiverRes = db_.getUserByUsername(receiverUsername);
         if (receiverRes.empty()) {
@@ -245,6 +256,10 @@ std::string MessengerServer::handleSendMessage(const std::string& sessionId, con
         }
         int receiverId = receiverRes[0]["id"].as<int>();
         int msgId = db_.insertMessage(senderId, receiverId, body);
+
+        const std::string event = "[EVENT] MESSAGE:from=" + senderUsername + 
+                                  ":to=" + receiverUsername + ":body=" + body;
+        notifyUsers({senderId, receiverId}, event);
         return "[OK] MessageSent:" + std::to_string(msgId);
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
@@ -337,6 +352,11 @@ std::string MessengerServer::handleSetAvatar(const std::string& sessionId, const
 
     try {
         db_.setUserAvatar(session->getUserId(), avatarB64, avatarMime);
+        const std::string username = session->getUsername();
+        std::vector<int> partners = db_.getChatPartnerIds(session->getUserId());
+        partners.push_back(session->getUserId());
+        const std::string event = "[EVENT] AVATAR:username=" + username;
+        notifyUsers(partners, event);
         return "[OK] AvatarUpdated";
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
@@ -361,6 +381,70 @@ std::string MessengerServer::handleGetInbox(const std::string& sessionId, int li
         return response;
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
+    }
+}
+
+std::string MessengerServer::handleSubscribe(const std::string& sessionId, int clientSocket) {
+    Session* session = sessionMgr_.getSession(sessionId);
+    if (!session) {
+        return "[ERROR] Invalid session";
+    }
+
+    registerSubscriber(clientSocket, session->getUserId());
+    return "[OK] SUBSCRIBED";
+}
+
+void MessengerServer::registerSubscriber(int clientSocket, int userId) {
+    std::lock_guard<std::mutex> lock(subscribersMutex_);
+    socketToUser_[clientSocket] = userId;
+    userToSockets_[userId].insert(clientSocket);
+}
+
+void MessengerServer::unregisterSubscriber(int clientSocket) {
+    std::lock_guard<std::mutex> lock(subscribersMutex_);
+    auto it = socketToUser_.find(clientSocket);
+    if (it == socketToUser_.end()) return;
+    int userId = it->second;
+    socketToUser_.erase(it);
+
+    auto userIt = userToSockets_.find(userId);
+    if (userIt != userToSockets_.end()) {
+        userIt->second.erase(clientSocket);
+        if (userIt->second.empty()) {
+            userToSockets_.erase(userIt);
+        }
+    }
+}
+
+void MessengerServer::notifyUsers(const std::vector<int>& userIds, const std::string& payload) {
+    std::lock_guard<std::mutex> lock(subscribersMutex_);
+    std::vector<int> socketsToRemove;
+
+    for (int userId : userIds) {
+        auto it = userToSockets_.find(userId);
+        if (it == userToSockets_.end()) continue;
+
+        for (int sock : it->second) {
+            std::string msg = payload + "\n";
+            if (send(sock, msg.c_str(), msg.length(), 0) < 0) {
+                socketsToRemove.push_back(sock);
+            }
+        }
+    }
+
+    for (int sock : socketsToRemove) {
+        auto it = socketToUser_.find(sock);
+        if (it == socketToUser_.end()) continue;
+        int userId = it->second;
+        socketToUser_.erase(it);
+
+        auto userIt = userToSockets_.find(userId);
+        if (userIt != userToSockets_.end()) {
+            userIt->second.erase(sock);
+            if (userIt->second.empty()) {
+                userToSockets_.erase(userIt);
+            }
+        }
     }
 }
 

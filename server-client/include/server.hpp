@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "postgresql.hpp"
 #include "password_hash.hpp"
@@ -29,9 +30,13 @@ private:
     std::thread acceptThread_;
     std::vector<std::thread> clientThreads_;
     std::mutex threadsMutex_;
+    std::mutex subscribersMutex_;
 
     PostgresDatabase db_;
     SessionManager sessionMgr_;
+
+    std::unordered_map<int, int> socketToUser_;
+    std::unordered_map<int, std::unordered_set<int>> userToSockets_;
 
     void acceptConnections();
     void handleClient(int clientSocket);
@@ -50,6 +55,11 @@ private:
     std::string handleSetAvatar(const std::string& sessionId, const std::string& avatarB64, const std::string& avatarMime);
     std::string handleGetInbox(const std::string& sessionId, int limit = 20, int offset = 0);
     std::string handleDeleteChat(const std::string& sessionId, const std::string& contactUsername);
+    std::string handleSubscribe(const std::string& sessionId, int clientSocket);
+
+    void registerSubscriber(int clientSocket, int userId);
+    void unregisterSubscriber(int clientSocket);
+    void notifyUsers(const std::vector<int>& userIds, const std::string& payload);
 
     // Helper
     bool parseCommand(const std::string& data, std::string& cmd, std::unordered_map<std::string, std::string>& params);
