@@ -175,8 +175,8 @@ public:
             throw std::runtime_error("[PSQL.Database] Database not connected");
         }
 
+        pqxx::work txn(*pgConn.getConnection());
         try {
-            pqxx::work txn(*pgConn.getConnection());
             pqxx::result res = txn.exec(
                 "SELECT id, sender_id, receiver_id, body, created_at, is_read "
                 "FROM messages "
@@ -188,6 +188,7 @@ public:
             txn.commit();
             return res;
         } catch (const std::exception& e) {
+            try { txn.abort(); } catch (...) {}
             std::cerr << "[PSQL.Database] getMessagesBetween error: " << e.what() << std::endl;
             throw;
         }
@@ -234,8 +235,8 @@ public:
             throw std::runtime_error("[PSQL.Database] Database not connected");
         }
 
+        pqxx::work txn(*pgConn.getConnection());
         try {
-            pqxx::work txn(*pgConn.getConnection());
             txn.exec(
                 "UPDATE messages SET is_read = TRUE "
                 "WHERE receiver_id = " + txn.quote(receiverId) + " "
@@ -244,6 +245,7 @@ public:
             );
             txn.commit();
         } catch (const std::exception& e) {
+            try { txn.abort(); } catch (...) {}
             std::cerr << "[PSQL.Database] markMessagesRead error: " << e.what() << std::endl;
             throw;
         }
@@ -350,8 +352,8 @@ public:
             throw std::runtime_error("[PSQL.Database] Database not connected");
         }
 
+        pqxx::work txn(*pgConn.getConnection());
         try {
-            pqxx::work txn(*pgConn.getConnection());
             pqxx::result res = txn.exec(
                 "SELECT DISTINCT CASE "
                 "  WHEN sender_id = " + txn.quote(userId) + " THEN receiver_id "
@@ -369,7 +371,42 @@ public:
             }
             return partners;
         } catch (const std::exception& e) {
+            try { txn.abort(); } catch (...) {}
             std::cerr << "[PSQL.Database] getChatPartnerIds error: " << e.what() << std::endl;
+            throw;
+        }
+    }
+
+    // Combined operation to get messages and mark as read in single transaction
+    pqxx::result getMessagesAndMarkRead(int userId, int contactId, int limit = 50, int offset = 0) {
+        if (!pgConn.isConnected()) {
+            throw std::runtime_error("[PSQL.Database] Database not connected");
+        }
+
+        pqxx::work txn(*pgConn.getConnection());
+        try {
+            pqxx::result res = txn.exec(
+                "SELECT id, sender_id, receiver_id, body, created_at, is_read "
+                "FROM messages "
+                "WHERE (sender_id = " + txn.quote(userId) + " AND receiver_id = " + txn.quote(contactId) + ") "
+                "   OR (sender_id = " + txn.quote(contactId) + " AND receiver_id = " + txn.quote(userId) + ") "
+                "ORDER BY created_at ASC "
+                "LIMIT " + txn.quote(limit) + " OFFSET " + txn.quote(offset)
+            );
+            
+            // Mark as read in same transaction
+            txn.exec(
+                "UPDATE messages SET is_read = TRUE "
+                "WHERE receiver_id = " + txn.quote(userId) + " "
+                "AND sender_id = " + txn.quote(contactId) + " "
+                "AND is_read = FALSE"
+            );
+            
+            txn.commit();
+            return res;
+        } catch (const std::exception& e) {
+            try { txn.abort(); } catch (...) {}
+            std::cerr << "[PSQL.Database] getMessagesAndMarkRead error: " << e.what() << std::endl;
             throw;
         }
     }

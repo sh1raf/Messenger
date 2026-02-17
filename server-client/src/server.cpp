@@ -279,8 +279,9 @@ std::string MessengerServer::handleGetMessages(const std::string& sessionId, con
             return "[ERROR] User not found";
         }
         int contactId = contactRes[0]["id"].as<int>();
-        pqxx::result msgs = db_.getMessagesBetween(userId, contactId, limit, offset);
-        db_.markMessagesRead(userId, contactId);
+        
+        // Combined operation: get messages and mark as read in single transaction
+        pqxx::result msgs = db_.getMessagesAndMarkRead(userId, contactId, limit, offset);
         
         std::string response = "[OK] Messages:";
         for (auto row : msgs) {
