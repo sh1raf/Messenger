@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS messages (
     sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     receiver_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     body TEXT NOT NULL,
+    e2e_payload TEXT,
+    e2e_pub TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     is_read BOOLEAN NOT NULL DEFAULT FALSE
 );

@@ -132,7 +132,11 @@ void MessengerServer::handleClient(int clientSocket) {
                 response = handleLogout(params["sessionId"]);
             } else if (cmd == "SEND") {
                 response = handleSendMessage(params["sessionId"], params["to"], params["body"]);
+            } else if (cmd == "SEND_E2E") {
+                response = handleSendMessageE2e(params["sessionId"], params["to"], params["body"], params["e2e"], params["e2e_pub"]);
             } else if (cmd == "GET_MESSAGES") {
+                response = handleGetMessages(params["sessionId"], params["contact"]);
+            } else if (cmd == "GET_MESSAGES_E2E") {
                 response = handleGetMessages(params["sessionId"], params["contact"]);
             } else if (cmd == "GET_CHATS") {
                 response = handleGetChats(params["sessionId"]);
@@ -266,6 +270,37 @@ std::string MessengerServer::handleSendMessage(const std::string& sessionId, con
     }
 }
 
+std::string MessengerServer::handleSendMessageE2e(
+    const std::string& sessionId,
+    const std::string& receiverUsername,
+    const std::string& body,
+    const std::string& e2ePayload,
+    const std::string& e2ePub
+) {
+    Session* session = sessionMgr_.getSession(sessionId);
+    if (!session) {
+        return "[ERROR] Invalid session";
+    }
+
+    int senderId = session->getUserId();
+    std::string senderUsername = session->getUsername();
+    try {
+        pqxx::result receiverRes = db_.getUserByUsername(receiverUsername);
+        if (receiverRes.empty()) {
+            return "[ERROR] User not found";
+        }
+        int receiverId = receiverRes[0]["id"].as<int>();
+        int msgId = db_.insertMessageE2e(senderId, receiverId, body, e2ePayload, e2ePub);
+
+        const std::string event = "[EVENT] MESSAGE:from=" + senderUsername +
+                                  ":to=" + receiverUsername + ":body=" + body;
+        notifyUsers({senderId, receiverId}, event);
+        return "[OK] MessageSent:" + std::to_string(msgId);
+    } catch (const std::exception& e) {
+        return "[ERROR] " + std::string(e.what());
+    }
+}
+
 std::string MessengerServer::handleGetMessages(const std::string& sessionId, const std::string& contactUsername, int limit, int offset) {
     Session* session = sessionMgr_.getSession(sessionId);
     if (!session) {
@@ -286,10 +321,12 @@ std::string MessengerServer::handleGetMessages(const std::string& sessionId, con
         std::string response = "[OK] Messages:";
         for (auto row : msgs) {
             std::string isRead = row["is_read"].as<bool>() ? "1" : "0";
+            std::string e2ePayload = row["e2e_payload"].is_null() ? "" : row["e2e_payload"].as<std::string>();
+            std::string e2ePub = row["e2e_pub"].is_null() ? "" : row["e2e_pub"].as<std::string>();
             response += "|" + std::to_string(row["id"].as<int>()) + ":" + 
                        std::to_string(row["sender_id"].as<int>()) + ":" + 
                        isRead + ":" +
-                       row["body"].as<std::string>();
+                       row["body"].as<std::string>() + ":" + e2ePayload + ":" + e2ePub;
         }
         return response;
     } catch (const std::exception& e) {

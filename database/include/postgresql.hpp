@@ -170,6 +170,32 @@ public:
         }
     }
 
+    int insertMessageE2e(int senderId, int receiverId, const std::string& body, const std::string& e2ePayload, const std::string& e2ePub) {
+        if (!pgConn.isConnected()) {
+            throw std::runtime_error("[PSQL.Database] Database not connected");
+        }
+
+        try {
+            pqxx::work txn(*pgConn.getConnection());
+            pqxx::result res = txn.exec(
+                "INSERT INTO messages (sender_id, receiver_id, body, e2e_payload, e2e_pub, is_read) VALUES (" +
+                txn.quote(senderId) + ", " + txn.quote(receiverId) + ", " + txn.quote(body) + ", " +
+                txn.quote(e2ePayload) + ", " + txn.quote(e2ePub) + ", FALSE) "
+                "RETURNING id"
+            );
+            txn.commit();
+
+            if (res.empty()) {
+                return -1;
+            }
+
+            return res[0]["id"].as<int>();
+        } catch (const std::exception& e) {
+            std::cerr << "[PSQL.Database] insertMessageE2e error: " << e.what() << std::endl;
+            throw;
+        }
+    }
+
     pqxx::result getMessagesBetween(int userA, int userB, int limit = 50, int offset = 0) {
         if (!pgConn.isConnected()) {
             throw std::runtime_error("[PSQL.Database] Database not connected");
@@ -386,7 +412,7 @@ public:
         pqxx::work txn(*pgConn.getConnection());
         try {
             pqxx::result res = txn.exec(
-                "SELECT id, sender_id, receiver_id, body, created_at, is_read "
+                "SELECT id, sender_id, receiver_id, body, e2e_payload, e2e_pub, created_at, is_read "
                 "FROM messages "
                 "WHERE (sender_id = " + txn.quote(userId) + " AND receiver_id = " + txn.quote(contactId) + ") "
                 "   OR (sender_id = " + txn.quote(contactId) + " AND receiver_id = " + txn.quote(userId) + ") "

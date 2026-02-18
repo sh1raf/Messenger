@@ -48,6 +48,7 @@ private:
     std::string handleLogin(const std::string& username, const std::string& password);
     std::string handleLogout(const std::string& sessionId);
     std::string handleSendMessage(const std::string& sessionId, const std::string& receiverUsername, const std::string& body);
+    std::string handleSendMessageE2e(const std::string& sessionId, const std::string& receiverUsername, const std::string& body, const std::string& e2ePayload, const std::string& e2ePub);
     std::string handleGetMessages(const std::string& sessionId, const std::string& contactUsername, int limit = 50, int offset = 0);
     std::string handleSearchUsers(const std::string& query);
     std::string handleGetChats(const std::string& sessionId);
