@@ -31,12 +31,14 @@ private:
     std::vector<std::thread> clientThreads_;
     std::mutex threadsMutex_;
     std::mutex subscribersMutex_;
+    std::mutex recvBuffersMutex_;
 
     PostgresDatabase db_;
     SessionManager sessionMgr_;
 
     std::unordered_map<int, int> socketToUser_;
     std::unordered_map<int, std::unordered_set<int>> userToSockets_;
+    std::unordered_map<int, std::string> recvBuffers_;
 
     void acceptConnections();
     void handleClient(int clientSocket);

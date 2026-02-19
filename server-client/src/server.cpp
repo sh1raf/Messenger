@@ -5,6 +5,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <sstream>
+#include <cerrno>
 
 MessengerServer::MessengerServer(const std::string& dbConnStr, int port)
     : port_(port), serverSocket_(-1), running_(false), db_(dbConnStr) {
@@ -165,29 +166,67 @@ void MessengerServer::handleClient(int clientSocket) {
         unregisterSubscriber(clientSocket);
     }
 
+    {
+        std::lock_guard<std::mutex> lock(recvBuffersMutex_);
+        recvBuffers_.erase(clientSocket);
+    }
+
     close(clientSocket);
 }
 
 void MessengerServer::sendMessage(int sock, const std::string& response) {
     std::string msg = response + "\n";
-    if (send(sock, msg.c_str(), msg.length(), 0) < 0) {
-        throw std::runtime_error("Failed to send message");
+    size_t totalSent = 0;
+    while (totalSent < msg.size()) {
+#ifdef MSG_NOSIGNAL
+        ssize_t sent = send(sock, msg.c_str() + totalSent, msg.size() - totalSent, MSG_NOSIGNAL);
+#else
+        ssize_t sent = send(sock, msg.c_str() + totalSent, msg.size() - totalSent, 0);
+#endif
+        if (sent <= 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            throw std::runtime_error("Failed to send message");
+        }
+        totalSent += static_cast<size_t>(sent);
     }
 }
 
 std::string MessengerServer::receiveMessage(int sock) {
-    char buffer[1024] = {0};
-    int n = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (n <= 0) {
-        return "";
+    const size_t maxMessageSize = 1024 * 1024;
+    std::string buffer;
+    {
+        std::lock_guard<std::mutex> lock(recvBuffersMutex_);
+        buffer = recvBuffers_[sock];
     }
-    buffer[n] = '\0';
-    std::string msg(buffer);
-    // Remove trailing newline if present
-    if (!msg.empty() && msg.back() == '\n') {
-        msg.pop_back();
+
+    while (true) {
+        size_t newlinePos = buffer.find('\n');
+        if (newlinePos != std::string::npos) {
+            std::string line = buffer.substr(0, newlinePos);
+            buffer.erase(0, newlinePos + 1);
+            {
+                std::lock_guard<std::mutex> lock(recvBuffersMutex_);
+                recvBuffers_[sock] = buffer;
+            }
+            return line;
+        }
+
+        char chunk[1024];
+        int n = recv(sock, chunk, sizeof(chunk), 0);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            return "";
+        }
+
+        buffer.append(chunk, static_cast<size_t>(n));
+        if (buffer.size() > maxMessageSize) {
+            return "";
+        }
     }
-    return msg;
 }
 
 std::string MessengerServer::handleRegister(const std::string& username, const std::string& password) {
@@ -464,7 +503,24 @@ void MessengerServer::notifyUsers(const std::vector<int>& userIds, const std::st
 
         for (int sock : it->second) {
             std::string msg = payload + "\n";
-            if (send(sock, msg.c_str(), msg.length(), 0) < 0) {
+            size_t totalSent = 0;
+            bool failed = false;
+            while (totalSent < msg.size()) {
+#ifdef MSG_NOSIGNAL
+                ssize_t sent = send(sock, msg.c_str() + totalSent, msg.size() - totalSent, MSG_NOSIGNAL);
+#else
+                ssize_t sent = send(sock, msg.c_str() + totalSent, msg.size() - totalSent, 0);
+#endif
+                if (sent <= 0) {
+                    if (errno == EINTR) {
+                        continue;
+                    }
+                    failed = true;
+                    break;
+                }
+                totalSent += static_cast<size_t>(sent);
+            }
+            if (failed) {
                 socketsToRemove.push_back(sock);
             }
         }

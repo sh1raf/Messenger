@@ -38,7 +38,10 @@ private:
     int socket_;
     std::string sessionId_;
     int userId_;
+    std::string recvBuffer_;
 
     std::string sendCommand(const std::string& cmd);
     std::string buildCommand(const std::string& cmd, const std::unordered_map<std::string, std::string>& params);
+    bool sendAll(const std::string& data);
+    bool readLine(std::string& line);
 };

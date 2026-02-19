@@ -1,6 +1,7 @@
 #include "client.hpp"
 #include <sstream>
 #include <cstring>
+#include <cerrno>
 
 MessengerClient::MessengerClient(const std::string& host, int port)
     : host_(host), port_(port), socket_(-1), userId_(-1) {}
@@ -67,25 +68,63 @@ std::string MessengerClient::sendCommand(const std::string& cmd) {
         return "[ERROR] Not connected";
     }
 
-    std::string msg = cmd + "\n";
-    if (send(socket_, msg.c_str(), msg.length(), 0) < 0) {
+    if (!sendAll(cmd + "\n")) {
         std::cerr << "[Client] Failed to send command" << std::endl;
         return "[ERROR] Send failed";
     }
 
-    char buffer[4096] = {0};
-    int n = recv(socket_, buffer, sizeof(buffer) - 1, 0);
-    if (n <= 0) {
+    std::string response;
+    if (!readLine(response)) {
         std::cerr << "[Client] Failed to receive response" << std::endl;
         return "[ERROR] Receive failed";
     }
 
-    buffer[n] = '\0';
-    std::string response(buffer);
-    if (!response.empty() && response.back() == '\n') {
-        response.pop_back();
-    }
     return response;
+}
+
+bool MessengerClient::sendAll(const std::string& data) {
+    size_t totalSent = 0;
+    while (totalSent < data.size()) {
+#ifdef MSG_NOSIGNAL
+        ssize_t sent = send(socket_, data.c_str() + totalSent, data.size() - totalSent, MSG_NOSIGNAL);
+#else
+        ssize_t sent = send(socket_, data.c_str() + totalSent, data.size() - totalSent, 0);
+#endif
+        if (sent <= 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+        totalSent += static_cast<size_t>(sent);
+    }
+    return true;
+}
+
+bool MessengerClient::readLine(std::string& line) {
+    const size_t maxMessageSize = 1024 * 1024;
+    while (true) {
+        size_t newlinePos = recvBuffer_.find('\n');
+        if (newlinePos != std::string::npos) {
+            line = recvBuffer_.substr(0, newlinePos);
+            recvBuffer_.erase(0, newlinePos + 1);
+            return true;
+        }
+
+        char chunk[1024];
+        int n = recv(socket_, chunk, sizeof(chunk), 0);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) {
+                continue;
+            }
+            return false;
+        }
+
+        recvBuffer_.append(chunk, static_cast<size_t>(n));
+        if (recvBuffer_.size() > maxMessageSize) {
+            return false;
+        }
+    }
 }
 
 std::string MessengerClient::registerUser(const std::string& username, const std::string& password) {
