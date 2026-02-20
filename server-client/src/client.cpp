@@ -2,6 +2,7 @@
 #include <sstream>
 #include <cstring>
 #include <cerrno>
+#include <sys/time.h>
 
 MessengerClient::MessengerClient(const std::string& host, int port)
     : host_(host), port_(port), socket_(-1), userId_(-1) {}
@@ -15,6 +16,16 @@ bool MessengerClient::connect() {
     if (socket_ < 0) {
         std::cerr << "[Client] Failed to create socket" << std::endl;
         return false;
+    }
+
+    timeval timeout;
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+    if (setsockopt(socket_, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        std::cerr << "[Client] Failed to set receive timeout" << std::endl;
+    }
+    if (setsockopt(socket_, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        std::cerr << "[Client] Failed to set send timeout" << std::endl;
     }
 
     struct sockaddr_in addr;

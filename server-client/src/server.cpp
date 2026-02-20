@@ -6,6 +6,7 @@
 #include <cstring>
 #include <sstream>
 #include <cerrno>
+#include <sys/time.h>
 
 MessengerServer::MessengerServer(const std::string& dbConnStr, int port)
     : port_(port), serverSocket_(-1), running_(false), db_(dbConnStr) {
@@ -110,6 +111,15 @@ void MessengerServer::acceptConnections() {
 
 void MessengerServer::handleClient(int clientSocket) {
     bool subscribed = false;
+    timeval timeout;
+    timeout.tv_sec = 30;
+    timeout.tv_usec = 0;
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        std::cerr << "[Server] Failed to set receive timeout" << std::endl;
+    }
+    if (setsockopt(clientSocket, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0) {
+        std::cerr << "[Server] Failed to set send timeout" << std::endl;
+    }
     try {
         while (running_) {
             std::string request = receiveMessage(clientSocket);
