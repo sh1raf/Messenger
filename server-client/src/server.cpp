@@ -339,10 +339,10 @@ std::string MessengerServer::handleSendMessageE2e(
             return "[ERROR] User not found";
         }
         int receiverId = receiverRes[0]["id"].as<int>();
-        int msgId = db_.insertMessageE2e(senderId, receiverId, body, e2ePayload, e2ePub);
+        int msgId = db_.insertMessageE2e(senderId, receiverId, "", e2ePayload, e2ePub);
 
         const std::string event = "[EVENT] MESSAGE:from=" + senderUsername +
-                                  ":to=" + receiverUsername + ":body=" + body;
+                      ":to=" + receiverUsername + ":body=";
         notifyUsers({senderId, receiverId}, event);
         return "[OK] MessageSent:" + std::to_string(msgId);
     } catch (const std::exception& e) {

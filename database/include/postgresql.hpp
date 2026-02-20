@@ -176,10 +176,11 @@ public:
         }
 
         try {
+            const std::string emptyBody;
             pqxx::work txn(*pgConn.getConnection());
             pqxx::result res = txn.exec(
                 "INSERT INTO messages (sender_id, receiver_id, body, e2e_payload, e2e_pub, is_read) VALUES (" +
-                txn.quote(senderId) + ", " + txn.quote(receiverId) + ", " + txn.quote(body) + ", " +
+                txn.quote(senderId) + ", " + txn.quote(receiverId) + ", " + txn.quote(emptyBody) + ", " +
                 txn.quote(e2ePayload) + ", " + txn.quote(e2ePub) + ", FALSE) "
                 "RETURNING id"
             );
