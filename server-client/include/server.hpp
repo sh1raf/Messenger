@@ -10,8 +10,21 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#if __has_include("postgresql.hpp")
 #include "postgresql.hpp"
+#elif __has_include("../../database/include/postgresql.hpp")
+#include "../../database/include/postgresql.hpp"
+#else
+#error "postgresql.hpp not found. Add database/include to include paths."
+#endif
+
+#if __has_include("password_hash.hpp")
 #include "password_hash.hpp"
+#elif __has_include("../../database/include/password_hash.hpp")
+#include "../../database/include/password_hash.hpp"
+#else
+#error "password_hash.hpp not found. Add database/include to include paths."
+#endif
 #include "session.hpp"
 
 class MessengerServer {

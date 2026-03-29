@@ -271,7 +271,7 @@ std::string MessengerServer::receiveMessage(int sock) {
         char chunk[1024];
         int n = recv(sock, chunk, sizeof(chunk), 0);
         if (n <= 0) {
-            if (n < 0 && errno == EINTR) {
+            if (n < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)) {
                 continue;
             }
             return "";
