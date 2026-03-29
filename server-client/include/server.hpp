@@ -56,6 +56,7 @@ private:
     std::string handleGetChats(const std::string& sessionId);
     std::string handleGetProfile(const std::string& username);
     std::string handleSetAvatar(const std::string& sessionId, const std::string& avatarB64, const std::string& avatarMime);
+    std::string handleSetE2ePub(const std::string& sessionId, const std::string& e2ePub);
     std::string handleGetInbox(const std::string& sessionId, int limit = 20, int offset = 0);
     std::string handleDeleteChat(const std::string& sessionId, const std::string& contactUsername);
     std::string handleSubscribe(const std::string& sessionId, int clientSocket);

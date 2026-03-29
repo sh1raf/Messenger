@@ -8,6 +8,36 @@
 #include <cerrno>
 #include <sys/time.h>
 
+namespace {
+const char kBase64Chars[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string base64Encode(const std::string& input) {
+    if (input.empty()) {
+        return "";
+    }
+    std::string out;
+    out.reserve(((input.size() + 2) / 3) * 4);
+    int val = 0;
+    int valb = -6;
+    for (unsigned char c : input) {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0) {
+            out.push_back(kBase64Chars[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+    if (valb > -6) {
+        out.push_back(kBase64Chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    }
+    while (out.size() % 4) {
+        out.push_back('=');
+    }
+    return out;
+}
+}
+
 MessengerServer::MessengerServer(const std::string& dbConnStr, int port)
     : port_(port), serverSocket_(-1), running_(false), db_(dbConnStr) {
     if (!db_.isConnected()) {
@@ -135,6 +165,15 @@ void MessengerServer::handleClient(int clientSocket) {
 
             std::string response = "[ERROR] Unknown command";
 
+            auto parseInt = [](const std::string& value, int fallback) {
+                if (value.empty()) return fallback;
+                try {
+                    return std::max(0, std::stoi(value));
+                } catch (...) {
+                    return fallback;
+                }
+            };
+
             if (cmd == "REGISTER") {
                 response = handleRegister(params["username"], params["password"]);
             } else if (cmd == "LOGIN") {
@@ -146,15 +185,21 @@ void MessengerServer::handleClient(int clientSocket) {
             } else if (cmd == "SEND_E2E") {
                 response = handleSendMessageE2e(params["sessionId"], params["to"], params["body"], params["e2e"], params["e2e_pub"]);
             } else if (cmd == "GET_MESSAGES") {
-                response = handleGetMessages(params["sessionId"], params["contact"]);
+                const int limit = parseInt(params["limit"], 50);
+                const int offset = parseInt(params["offset"], 0);
+                response = handleGetMessages(params["sessionId"], params["contact"], limit, offset);
             } else if (cmd == "GET_MESSAGES_E2E") {
-                response = handleGetMessages(params["sessionId"], params["contact"]);
+                const int limit = parseInt(params["limit"], 50);
+                const int offset = parseInt(params["offset"], 0);
+                response = handleGetMessages(params["sessionId"], params["contact"], limit, offset);
             } else if (cmd == "GET_CHATS") {
                 response = handleGetChats(params["sessionId"]);
             } else if (cmd == "GET_PROFILE") {
                 response = handleGetProfile(params["username"]);
             } else if (cmd == "SET_AVATAR") {
                 response = handleSetAvatar(params["sessionId"], params["data"], params["mime"]);
+            } else if (cmd == "SET_E2E_PUB") {
+                response = handleSetE2ePub(params["sessionId"], params["pub"]);
             } else if (cmd == "GET_INBOX") {
                 response = handleGetInbox(params["sessionId"]);
             } else if (cmd == "DELETE_CHAT") {
@@ -370,7 +415,8 @@ std::string MessengerServer::handleGetMessages(const std::string& sessionId, con
         std::string response = "[OK] Messages:";
         for (auto row : msgs) {
             std::string isRead = row["is_read"].as<bool>() ? "1" : "0";
-            std::string e2ePayload = row["e2e_payload"].is_null() ? "" : row["e2e_payload"].as<std::string>();
+            std::string e2ePayloadRaw = row["e2e_payload"].is_null() ? "" : row["e2e_payload"].as<std::string>();
+            std::string e2ePayload = base64Encode(e2ePayloadRaw);
             std::string e2ePub = row["e2e_pub"].is_null() ? "" : row["e2e_pub"].as<std::string>();
             response += "|" + std::to_string(row["id"].as<int>()) + ":" + 
                        std::to_string(row["sender_id"].as<int>()) + ":" + 
@@ -420,8 +466,9 @@ std::string MessengerServer::handleGetProfile(const std::string& username) {
 
         std::string avatarB64 = res[0]["avatar_b64"].is_null() ? "" : res[0]["avatar_b64"].as<std::string>();
         std::string avatarMime = res[0]["avatar_mime"].is_null() ? "" : res[0]["avatar_mime"].as<std::string>();
+        std::string e2ePub = res[0]["e2e_pub"].is_null() ? "" : res[0]["e2e_pub"].as<std::string>();
 
-        return "[OK] Profile:username=" + username + ":avatar_b64=" + avatarB64 + ":mime=" + avatarMime;
+        return "[OK] Profile:username=" + username + ":avatar_b64=" + avatarB64 + ":mime=" + avatarMime + ":e2e_pub=" + e2ePub;
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
     }
@@ -445,6 +492,24 @@ std::string MessengerServer::handleSetAvatar(const std::string& sessionId, const
         const std::string event = "[EVENT] AVATAR:username=" + username;
         notifyUsers(partners, event);
         return "[OK] AvatarUpdated";
+    } catch (const std::exception& e) {
+        return "[ERROR] " + std::string(e.what());
+    }
+}
+
+std::string MessengerServer::handleSetE2ePub(const std::string& sessionId, const std::string& e2ePub) {
+    Session* session = sessionMgr_.getSession(sessionId);
+    if (!session) {
+        return "[ERROR] Invalid session";
+    }
+
+    if (e2ePub.empty()) {
+        return "[ERROR] Public key required";
+    }
+
+    try {
+        db_.setUserE2ePub(session->getUserId(), e2ePub);
+        return "[OK] E2EUpdated";
     } catch (const std::exception& e) {
         return "[ERROR] " + std::string(e.what());
     }

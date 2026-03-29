@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     avatar_b64 TEXT,
     avatar_mime TEXT,
+    e2e_pub TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

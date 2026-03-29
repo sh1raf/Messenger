@@ -229,7 +229,7 @@ public:
         try {
             pqxx::work txn(*pgConn.getConnection());
             pqxx::result res = txn.exec(
-                "SELECT avatar_b64, avatar_mime FROM users WHERE username = " + txn.quote(username)
+                "SELECT avatar_b64, avatar_mime, e2e_pub FROM users WHERE username = " + txn.quote(username)
             );
             txn.commit();
             return res;
@@ -253,6 +253,23 @@ public:
             txn.commit();
         } catch (const std::exception& e) {
             std::cerr << "[PSQL.Database] setUserAvatar error: " << e.what() << std::endl;
+            throw;
+        }
+    }
+
+    void setUserE2ePub(int userId, const std::string& e2ePub) {
+        if (!pgConn.isConnected()) {
+            throw std::runtime_error("[PSQL.Database] Database not connected");
+        }
+
+        try {
+            pqxx::work txn(*pgConn.getConnection());
+            txn.exec(
+                "UPDATE users SET e2e_pub = " + txn.quote(e2ePub) + " WHERE id = " + txn.quote(userId)
+            );
+            txn.commit();
+        } catch (const std::exception& e) {
+            std::cerr << "[PSQL.Database] setUserE2ePub error: " << e.what() << std::endl;
             throw;
         }
     }
@@ -414,11 +431,15 @@ public:
         try {
             pqxx::result res = txn.exec(
                 "SELECT id, sender_id, receiver_id, body, e2e_payload, e2e_pub, created_at, is_read "
-                "FROM messages "
-                "WHERE (sender_id = " + txn.quote(userId) + " AND receiver_id = " + txn.quote(contactId) + ") "
-                "   OR (sender_id = " + txn.quote(contactId) + " AND receiver_id = " + txn.quote(userId) + ") "
-                "ORDER BY created_at ASC "
-                "LIMIT " + txn.quote(limit) + " OFFSET " + txn.quote(offset)
+                "FROM ("
+                "  SELECT id, sender_id, receiver_id, body, e2e_payload, e2e_pub, created_at, is_read "
+                "  FROM messages "
+                "  WHERE (sender_id = " + txn.quote(userId) + " AND receiver_id = " + txn.quote(contactId) + ") "
+                "     OR (sender_id = " + txn.quote(contactId) + " AND receiver_id = " + txn.quote(userId) + ") "
+                "  ORDER BY created_at DESC "
+                "  LIMIT " + txn.quote(limit) + " OFFSET " + txn.quote(offset) +
+                ") sub "
+                "ORDER BY created_at ASC"
             );
             
             // Mark as read in same transaction
